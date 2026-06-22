@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Property Documents Portal</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <div class="brand"><span class="dot">●</span> <span id="orgName">Property Documents Portal</span></div>
+      <nav>
+        <button class="tab active" data-view="upload">Upload</button>
+        <button class="tab" data-view="dashboard">Dashboard</button>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <!-- config-missing banner -->
+    <div id="configBanner" class="msg error" style="margin-bottom:18px;">
+      ⚠️ This portal isn't connected yet. Open <code>config.js</code> and set <code>API_URL</code>.
+    </div>
+
+    <!-- ========================= UPLOAD VIEW ========================= -->
+    <section id="view-upload" class="view active">
+      <h1>Upload a document</h1>
+      <p class="sub">Choose your property and what you're uploading. The file is filed automatically.</p>
+
+      <div class="card">
+        <div class="row">
+          <div class="field">
+            <label for="property">Property</label>
+            <select id="property"><option value="">Loading…</option></select>
+          </div>
+          <div class="field">
+            <label for="docType">Document type</label>
+            <select id="docType"><option value="">Loading…</option></select>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label for="reportDate">Date on the document <span class="hint">(e.g. inspection date — optional)</span></label>
+            <input type="date" id="reportDate" />
+          </div>
+          <div class="field">
+            <label for="uploadedBy">Your name <span class="hint">(optional)</span></label>
+            <input type="text" id="uploadedBy" placeholder="e.g. Jordan T." />
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="note">Note <span class="hint">(optional)</span></label>
+          <textarea id="note" placeholder="Anything worth flagging about this document…"></textarea>
+        </div>
+
+        <div class="field" id="uploadKeyField" style="display:none;">
+          <label for="uploadKey">Upload key <span class="hint">(ask your manager)</span></label>
+          <input type="text" id="uploadKey" />
+        </div>
+
+        <div class="field">
+          <label>File(s)</label>
+          <div id="drop" class="drop">
+            <strong>Click to choose</strong> or drag &amp; drop here<br />
+            <span class="hint" id="dropHint">PDF, images, Word, Excel…</span>
+          </div>
+          <input type="file" id="fileInput" multiple style="display:none;" />
+          <div id="fileList" class="filelist"></div>
+        </div>
+
+        <button id="uploadBtn" class="primary">Upload</button>
+        <div id="uploadMsg" class="msg"></div>
+      </div>
+    </section>
+
+    <!-- ======================= DASHBOARD VIEW ======================= -->
+    <section id="view-dashboard" class="view">
+      <h1>Compliance dashboard</h1>
+      <p class="sub">Every property, every document type, at a glance.</p>
+
+      <!-- passcode gate -->
+      <div id="lock" class="card lock">
+        <h3>🔒 Restricted view</h3>
+        <p class="muted">Enter the passcode to see all property documents.</p>
+        <input type="text" id="passcode" placeholder="Passcode" />
+        <div><button id="unlockBtn" class="primary">Unlock</button></div>
+        <div id="lockMsg" class="msg"></div>
+      </div>
+
+      <!-- unlocked content -->
+      <div id="board" style="display:none;">
+        <div class="stats" id="stats"></div>
+
+        <div class="toolbar">
+          <input type="text" id="search" placeholder="Search files, notes, names…" />
+          <select id="filterProperty"><option value="">All properties</option></select>
+          <select id="filterDocType"><option value="">All document types</option></select>
+          <label class="toggle"><input type="checkbox" id="onlyProblems" /> Only needs attention</label>
+          <span class="spacer"></span>
+          <button class="ghost" id="exportBtn">Export CSV</button>
+          <button class="ghost" id="refreshBtn">↻ Refresh</button>
+        </div>
+
+        <div class="matrix-wrap">
+          <table class="matrix" id="matrix"></table>
+        </div>
+        <div class="legend">
+          <span><i class="swatch" style="background:var(--ok-bg)"></i> Current</span>
+          <span><i class="swatch" style="background:var(--due-bg)"></i> Due soon</span>
+          <span><i class="swatch" style="background:var(--over-bg)"></i> Overdue</span>
+          <span><i class="swatch" style="background:var(--missing-bg)"></i> Missing</span>
+          <span id="genAt" style="margin-left:auto;"></span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- file-detail modal -->
+  <div id="modalBg" class="modal-bg">
+    <div class="modal">
+      <button class="x" id="modalClose">×</button>
+      <h3 id="modalTitle">Documents</h3>
+      <p class="muted" id="modalSub"></p>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
+  <script src="./config.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
