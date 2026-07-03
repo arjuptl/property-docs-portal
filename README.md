@@ -178,6 +178,33 @@ Other handy URL patterns (the site understands these anywhere):
 
 ---
 
+## Automatic email reminders
+
+The backend can email people before things lapse — no extra services, it sends
+from your Gmail via Apps Script:
+
+- **Per-property emails** (to each GM / front desk) listing only their overdue,
+  due-soon, and missing documents, with their locked upload link as a button.
+- **A weekly digest** to the owners with everything across all properties and a
+  dashboard link.
+
+Setup, in the Apps Script editor:
+
+1. Fill in the `REMINDERS` block in the CONFIG (at minimum `SUMMARY_EMAILS`;
+   add `PROPERTY_EMAILS` as you collect GMs' addresses).
+2. Function dropdown → **setupReminders** → Run (installs the Monday ~8am
+   schedule; approve the permission prompt).
+3. Function dropdown → **sendReminders** → Run (sends real emails right now, so
+   you can see what everyone will get).
+
+Notes: properties with nothing to fix get no email. `NOT_APPLICABLE` silences
+combos that don't exist (no pool → no Pool/Spa nagging). `INCLUDE_MISSING:
+false` switches to renewal-chasing only. For daily instead of weekly, change
+`onWeekDay(...)` to `.everyDays(1)` in `setupReminders`. Free Gmail allows ~100
+recipients/day — far more than this needs.
+
+---
+
 ## Performance
 
 The portal is built to feel instant:

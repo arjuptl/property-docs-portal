@@ -117,6 +117,36 @@ const CONFIG = {
     { name: 'Renovation',            renewalMonths: 0  },
     { name: 'Other',                 renewalMonths: 0  },
   ],
+
+  // 7) Automatic email reminders — see the REMINDERS section at the bottom.
+  //    Setup: run setupReminders() once, then sendReminders() once to test.
+  REMINDERS: {
+    // Your live site (used to put upload links inside the emails).
+    SITE_URL: 'https://arjuptl.github.io/property-docs-portal/',
+
+    // The "select few": get the full portfolio digest every week.
+    SUMMARY_EMAILS: ['arjuptl@gmail.com'],
+
+    // Each property's GM / front desk. They only get an email when THEIR
+    // property has something overdue, due soon, or missing.
+    PROPERTY_EMAILS: {
+      // 'Best Western Kalamazoo': 'gm-bw@example.com, frontdesk-bw@example.com',
+      // 'Hampton Inn Sturgis':    'gm-sturgis@example.com',
+    },
+
+    // Also chase never-uploaded items? Great while you onboard; set false
+    // later if you only want renewal reminders.
+    INCLUDE_MISSING: true,
+
+    // Combos that genuinely don't apply — never nagged about. Example:
+    NOT_APPLICABLE: {
+      // 'Motel 6 Peoria': ['Inspection — Elevator', 'Inspection — Pool / Spa'],
+    },
+
+    // Amber window for types without their own dueSoonDays.
+    // Keep in sync with DUE_SOON_DAYS in the website's config.js.
+    DEFAULT_DUE_SOON_DAYS: 10,
+  },
 };
 // ========================= END CONFIG (logic below) =========================
 
@@ -527,4 +557,180 @@ function json(obj) {
   return ContentService
     .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+
+// ======================= AUTOMATIC EMAIL REMINDERS ==========================
+//  One-time setup, from the Apps Script editor:
+//    1. Pick setupReminders in the function dropdown → Run   (installs the
+//       Monday-morning schedule; approve the permissions prompt)
+//    2. Pick sendReminders → Run   (sends a real test email right now)
+//  After that it runs by itself every Monday ~8am. To go daily, change
+//  setupReminders below to: .everyDays(1).atHour(8)
+// ============================================================================
+
+/** Installs (or re-installs) the weekly schedule. Run once. */
+function setupReminders() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'sendReminders') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('sendReminders')
+    .timeBased().onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(8)
+    .create();
+  Logger.log('✅ Reminders scheduled: every Monday ~8am. Now run sendReminders once to test.');
+}
+
+
+/** Reads Drive, works out what needs attention, and sends the emails. */
+function sendReminders() {
+  const R = CONFIG.REMINDERS || {};
+  const flats = flatTypes();
+  let items;
+  try {
+    items = (typeof Drive !== 'undefined' && Drive.Files)
+      ? itemsViaDriveApi(flats) : itemsViaDriveApp(flats);
+  } catch (e) {
+    items = itemsViaDriveApp(flats);
+  }
+  const perProperty = reminderReport(flats, items, new Date());
+
+  const site = R.SITE_URL || '';
+  let totalOver = 0, totalDue = 0, totalMissing = 0;
+  const problemProps = [];
+
+  CONFIG.PROPERTIES.forEach(function (prop) {
+    const b = perProperty[prop];
+    totalOver += b.overdue.length;
+    totalDue += b.dueSoon.length;
+    totalMissing += b.missing.length;
+    const hasWork = b.overdue.length || b.dueSoon.length ||
+                    (R.INCLUDE_MISSING && b.missing.length);
+    if (hasWork) problemProps.push({ prop: prop, b: b });
+
+    const to = (R.PROPERTY_EMAILS || {})[prop];
+    if (!to || !hasWork) return;
+    MailApp.sendEmail({
+      to: to,
+      subject: '[' + prop + '] Documents need attention: ' + cellCounts(b, R),
+      htmlBody: propertyEmailHtml(prop, b, site, R),
+    });
+  });
+
+  if ((R.SUMMARY_EMAILS || []).length && problemProps.length) {
+    MailApp.sendEmail({
+      to: R.SUMMARY_EMAILS.join(','),
+      subject: 'Weekly documents digest: ' + totalOver + ' overdue · ' + totalDue + ' due soon' +
+               (R.INCLUDE_MISSING ? ' · ' + totalMissing + ' missing' : ''),
+      htmlBody: summaryEmailHtml(problemProps, site, R),
+    });
+  }
+  Logger.log('Reminders done. overdue=%s dueSoon=%s missing=%s properties_emailed=%s',
+             totalOver, totalDue, totalMissing,
+             Object.keys(R.PROPERTY_EMAILS || {}).length);
+}
+
+
+/** Pure status math (same rules as the dashboard) — property → buckets. */
+function reminderReport(flats, items, now) {
+  const R = CONFIG.REMINDERS || {};
+  const na = R.NOT_APPLICABLE || {};
+  const defaultWarn = (R.DEFAULT_DUE_SOON_DAYS != null) ? R.DEFAULT_DUE_SOON_DAYS : 10;
+
+  // newest document date per property × type
+  const newest = {};
+  items.forEach(function (it) {
+    const k = it.property + '|' + it.docType;
+    const d = it.reportDate || String(it.uploadedAt || '').slice(0, 10);
+    if (d && (!newest[k] || d > newest[k])) newest[k] = d;
+  });
+
+  const perProperty = {};
+  CONFIG.PROPERTIES.forEach(function (prop) {
+    const b = { overdue: [], dueSoon: [], missing: [] };
+    flats.forEach(function (ft) {
+      if ((na[prop] || []).indexOf(ft.label) > -1) return;
+      if (!ft.renewalMonths) return;               // Renovation/Contract/Other: nothing to chase
+      const latest = newest[prop + '|' + ft.label];
+      if (!latest) { b.missing.push(ft.label); return; }
+      const due = new Date(latest + 'T12:00:00');
+      due.setMonth(due.getMonth() + ft.renewalMonths);
+      const days = Math.round((due - now) / 86400000);
+      const warn = (ft.dueSoonDays != null) ? ft.dueSoonDays : defaultWarn;
+      const row = { type: ft.label, last: latest, due: due.toISOString().slice(0, 10), days: days };
+      if (days < 0) b.overdue.push(row);
+      else if (days <= warn) b.dueSoon.push(row);
+    });
+    perProperty[prop] = b;
+  });
+  return perProperty;
+}
+
+
+// ------------------------- email formatting helpers -------------------------
+
+function cellCounts(b, R) {
+  const parts = [];
+  if (b.overdue.length) parts.push(b.overdue.length + ' overdue');
+  if (b.dueSoon.length) parts.push(b.dueSoon.length + ' due soon');
+  if (R.INCLUDE_MISSING && b.missing.length) parts.push(b.missing.length + ' missing');
+  return parts.join(', ');
+}
+
+function htmlEsc(s) {
+  return String(s).replace(/[&<>"]/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+  });
+}
+
+function rowsTable(rows, color) {
+  return '<table cellpadding="6" cellspacing="0" style="border-collapse:collapse;margin:6px 0 14px;">' +
+    '<tr style="background:#f1f5f9;"><th align="left">Document</th><th align="left">Last on file</th><th align="left">Due</th><th align="left"></th></tr>' +
+    rows.map(function (r) {
+      const when = r.days < 0 ? Math.abs(r.days) + ' days overdue' : 'in ' + r.days + ' days';
+      return '<tr style="border-top:1px solid #e2e8f0;">' +
+        '<td><b style="color:' + color + ';">' + htmlEsc(r.type) + '</b></td>' +
+        '<td>' + htmlEsc(r.last) + '</td><td>' + htmlEsc(r.due) + '</td>' +
+        '<td style="color:#66727f;">' + when + '</td></tr>';
+    }).join('') + '</table>';
+}
+
+function propertyEmailHtml(prop, b, site, R) {
+  const uploadLink = site ? site + '?property=' + encodeURIComponent(prop) + '&lock=1' : '';
+  let h = '<div style="font-family:Arial,sans-serif;color:#1f2933;max-width:640px;">' +
+          '<h2 style="margin:0 0 4px;">' + htmlEsc(prop) + '</h2>' +
+          '<p style="margin:0 0 16px;color:#66727f;">Weekly document check — here is what needs attention.</p>';
+  if (b.overdue.length) h += '<h3 style="color:#dc2626;margin:14px 0 2px;">🔴 Overdue</h3>' + rowsTable(b.overdue, '#dc2626');
+  if (b.dueSoon.length) h += '<h3 style="color:#d97706;margin:14px 0 2px;">🟠 Due soon</h3>' + rowsTable(b.dueSoon, '#d97706');
+  if (R.INCLUDE_MISSING && b.missing.length) {
+    h += '<h3 style="color:#64748b;margin:14px 0 2px;">⚪ Never uploaded</h3>' +
+         '<p style="margin:4px 0 14px;">' + b.missing.map(htmlEsc).join(' · ') + '</p>';
+  }
+  if (uploadLink) {
+    h += '<p style="margin:18px 0;"><a href="' + htmlEsc(uploadLink) + '" ' +
+         'style="background:#2563eb;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:bold;">' +
+         '📤 Upload documents for ' + htmlEsc(prop) + '</a></p>';
+  }
+  h += '<p style="color:#94a3b8;font-size:12px;">Automated weekly reminder from the Property Documents Portal.</p></div>';
+  return h;
+}
+
+function summaryEmailHtml(problemProps, site, R) {
+  let h = '<div style="font-family:Arial,sans-serif;color:#1f2933;max-width:680px;">' +
+          '<h2 style="margin:0 0 12px;">Weekly documents digest</h2>';
+  problemProps.forEach(function (e) {
+    h += '<h3 style="margin:16px 0 2px;">' + htmlEsc(e.prop) +
+         ' <span style="font-weight:normal;color:#66727f;font-size:13px;">— ' + cellCounts(e.b, R) + '</span></h3>';
+    if (e.b.overdue.length) h += rowsTable(e.b.overdue, '#dc2626');
+    if (e.b.dueSoon.length) h += rowsTable(e.b.dueSoon, '#d97706');
+    if (R.INCLUDE_MISSING && e.b.missing.length) {
+      h += '<p style="margin:2px 0 10px;color:#64748b;">⚪ Missing: ' + e.b.missing.map(htmlEsc).join(' · ') + '</p>';
+    }
+  });
+  if (site) {
+    h += '<p style="margin:18px 0;"><a href="' + htmlEsc(site) + '#dashboard" ' +
+         'style="background:#2563eb;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:bold;">' +
+         'Open the dashboard</a></p>';
+  }
+  h += '<p style="color:#94a3b8;font-size:12px;">Automated weekly digest from the Property Documents Portal.</p></div>';
+  return h;
 }
