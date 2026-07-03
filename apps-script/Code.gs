@@ -223,10 +223,7 @@ function handleUpload(b) {
                                 'MB). Limit is ' + CONFIG.MAX_FILE_MB + 'MB.' };
   }
 
-  const root = DriveApp.getFolderById(CONFIG.ROOT_FOLDER_ID);
-  let typeFolder = getOrCreate(root, ft.category);
-  if (ft.sub) typeFolder = getOrCreate(typeFolder, ft.sub);
-  const propFolder = getOrCreate(typeFolder, b.property);
+  const propFolder = resolveUploadFolder(ft, b.property);
 
   // Prefix the filename with the report date (or today) so files sort by date
   // inside Drive and are easy to scan by eye.
@@ -276,42 +273,15 @@ function handleList(b) {
     }
   }
 
-  // Walk only the folders that actually exist (one listing per folder) instead
-  // of probing every Category × Sub × Property combination by name — that was
-  // hundreds of Drive lookups and the reason the dashboard crawled.
-  const propByLower = {};
-  CONFIG.PROPERTIES.forEach(function (p) { propByLower[p.toLowerCase()] = p; });
-  const ftByKey = {};
-  flats.forEach(function (f) {
-    ftByKey[(f.category + '\u0000' + f.sub).toLowerCase()] = f;
-  });
-
-  const items = [];
-  const root = DriveApp.getFolderById(CONFIG.ROOT_FOLDER_ID);
-  const cats = root.getFolders();
-  while (cats.hasNext()) {
-    const catFolder = cats.next();
-    const catName = catFolder.getName();
-    const simpleFt = ftByKey[(catName + '\u0000').toLowerCase()];
-    const kids = catFolder.getFolders();
-    while (kids.hasNext()) {
-      const kid = kids.next();
-      const kidName = kid.getName();
-      const subFt = ftByKey[(catName + '\u0000' + kidName).toLowerCase()];
-      if (subFt) {
-        // kid is a subcategory folder — its children are property folders
-        const propFolders = kid.getFolders();
-        while (propFolders.hasNext()) {
-          const pf = propFolders.next();
-          const canonical = propByLower[pf.getName().toLowerCase()];
-          if (canonical) collectFiles(pf, canonical, subFt, items);
-        }
-      } else if (simpleFt) {
-        // kid is a property folder directly under a simple category
-        const canonical = propByLower[kidName.toLowerCase()];
-        if (canonical) collectFiles(kid, canonical, simpleFt, items);
-      }
-    }
+  let items;
+  try {
+    // Fastest path: the Drive advanced service batches whole folder levels into
+    // a handful of API calls (enable once: Editor -> Services -> + -> Drive API).
+    items = (typeof Drive !== 'undefined' && Drive.Files)
+      ? itemsViaDriveApi(flats)
+      : itemsViaDriveApp(flats);
+  } catch (apiProblem) {
+    items = itemsViaDriveApp(flats);   // never let the fast path take the site down
   }
 
   const out = {
@@ -325,6 +295,166 @@ function handleList(b) {
   };
   try { cache.put(cacheKey, JSON.stringify(out), 600); } catch (tooBig) { /* >100KB: serve live only */ }
   return out;
+}
+
+
+/** Collision-proof lookup key for a (category, sub) pair. */
+function typeKey(category, sub) {
+  return JSON.stringify([String(category).toLowerCase(), String(sub || '').toLowerCase()]);
+}
+
+
+/**
+ * Collects dashboard items with ~4-6 batched Drive API calls TOTAL (category
+ * folders, their children, property folders, then all files) instead of one
+ * call per folder - stays fast no matter how many documents accumulate.
+ */
+function itemsViaDriveApi(flats) {
+  const propByLower = {};
+  CONFIG.PROPERTIES.forEach(function (p) { propByLower[p.toLowerCase()] = p; });
+  const ftByKey = {};
+  flats.forEach(function (f) { ftByKey[typeKey(f.category, f.sub)] = f; });
+  const isCategory = {};
+  CONFIG.DOC_TYPES.forEach(function (t) { isCategory[t.name.toLowerCase()] = true; });
+
+  // Level 1: category folders under the root
+  const catById = {};
+  driveChildren([CONFIG.ROOT_FOLDER_ID], true).forEach(function (f) {
+    if (isCategory[f.name.toLowerCase()]) catById[f.id] = f;
+  });
+
+  // Level 2: children of category folders - subcategory or property folders
+  const propFolders = [];
+  const subById = {};
+  if (Object.keys(catById).length) {
+    driveChildren(Object.keys(catById), true).forEach(function (f) {
+      const parent = (f.parents || []).map(function (id) { return catById[id]; }).filter(Boolean)[0];
+      if (!parent) return;
+      const subFt = ftByKey[typeKey(parent.name, f.name)];
+      if (subFt) { subById[f.id] = { ft: subFt }; return; }
+      const simpleFt = ftByKey[typeKey(parent.name, '')];
+      const canonical = propByLower[f.name.toLowerCase()];
+      if (simpleFt && canonical) propFolders.push({ id: f.id, property: canonical, ft: simpleFt });
+    });
+  }
+
+  // Level 3: property folders inside subcategory folders
+  if (Object.keys(subById).length) {
+    driveChildren(Object.keys(subById), true).forEach(function (f) {
+      const parent = (f.parents || []).map(function (id) { return subById[id]; }).filter(Boolean)[0];
+      const canonical = propByLower[f.name.toLowerCase()];
+      if (parent && canonical) propFolders.push({ id: f.id, property: canonical, ft: parent.ft });
+    });
+  }
+
+  // Level 4: every file inside every property folder, batched
+  const items = [];
+  const pfById = {};
+  propFolders.forEach(function (p) { pfById[p.id] = p; });
+  if (Object.keys(pfById).length) {
+    driveChildren(Object.keys(pfById), false).forEach(function (f) {
+      const pf = (f.parents || []).map(function (id) { return pfById[id]; }).filter(Boolean)[0];
+      if (!pf) return;
+      let meta = {};
+      try { meta = JSON.parse(f.description || '{}'); } catch (ignore) {}
+      items.push({
+        property: pf.property,
+        docType: pf.ft.label,
+        category: pf.ft.category,
+        sub: pf.ft.sub,
+        fileName: f.name,
+        url: f.url,
+        sizeKB: Math.round((f.size || 0) / 1024),
+        reportDate: meta.reportDate || '',
+        uploadedBy: meta.uploadedBy || '',
+        note: meta.note || '',
+        uploadedAt: meta.uploadedAt || f.createdTime || '',
+      });
+    });
+  }
+  return items;
+}
+
+
+let DRIVE_IS_V3 = null;   // detected on first call; both service versions work
+
+/** Lists children of many parent folders in one query (chunks of 20 parents). */
+function driveChildren(parentIds, foldersOnly) {
+  const out = [];
+  for (let i = 0; i < parentIds.length; i += 20) {
+    const chunk = parentIds.slice(i, i + 20);
+    const q = '(' + chunk.map(function (id) { return "'" + id + "' in parents"; }).join(' or ') + ')' +
+              ' and trashed=false and mimeType' + (foldersOnly ? '=' : '!=') +
+              "'application/vnd.google-apps.folder'";
+    let pageToken = null;
+    do {
+      let res = null;
+      if (DRIVE_IS_V3 !== false) {
+        try {
+          res = Drive.Files.list({ q: q, pageSize: 1000, pageToken: pageToken,
+            fields: 'nextPageToken, files(id,name,size,description,createdTime,webViewLink,parents)' });
+          DRIVE_IS_V3 = true;
+        } catch (v2Signature) {
+          if (DRIVE_IS_V3 === true) throw v2Signature;
+          DRIVE_IS_V3 = false;
+        }
+      }
+      if (DRIVE_IS_V3 === false) {
+        res = Drive.Files.list({ q: q, maxResults: 1000, pageToken: pageToken,
+          fields: 'nextPageToken, items(id,title,fileSize,description,createdDate,alternateLink,parents/id)' });
+      }
+      (res.files || res.items || []).forEach(function (f) {
+        out.push({
+          id: f.id,
+          name: f.name || f.title || '',
+          size: Number(f.size || f.fileSize || 0),
+          description: f.description || '',
+          createdTime: f.createdTime || f.createdDate || '',
+          url: f.webViewLink || f.alternateLink || ('https://drive.google.com/file/d/' + f.id + '/view'),
+          parents: (f.parents || []).map(function (p) { return p.id || p; }),
+        });
+      });
+      pageToken = res.nextPageToken;
+    } while (pageToken);
+  }
+  return out;
+}
+
+
+/** Fallback collector using plain DriveApp (Drive API service not enabled):
+ *  walks only folders that exist - one listing per folder. */
+function itemsViaDriveApp(flats) {
+  const propByLower = {};
+  CONFIG.PROPERTIES.forEach(function (p) { propByLower[p.toLowerCase()] = p; });
+  const ftByKey = {};
+  flats.forEach(function (f) { ftByKey[typeKey(f.category, f.sub)] = f; });
+
+  const items = [];
+  const root = DriveApp.getFolderById(CONFIG.ROOT_FOLDER_ID);
+  const cats = root.getFolders();
+  while (cats.hasNext()) {
+    const catFolder = cats.next();
+    const catName = catFolder.getName();
+    const simpleFt = ftByKey[typeKey(catName, '')];
+    const kids = catFolder.getFolders();
+    while (kids.hasNext()) {
+      const kid = kids.next();
+      const kidName = kid.getName();
+      const subFt = ftByKey[typeKey(catName, kidName)];
+      if (subFt) {
+        const propFolders = kid.getFolders();
+        while (propFolders.hasNext()) {
+          const pf = propFolders.next();
+          const canonical = propByLower[pf.getName().toLowerCase()];
+          if (canonical) collectFiles(pf, canonical, subFt, items);
+        }
+      } else if (simpleFt) {
+        const canonical = propByLower[kidName.toLowerCase()];
+        if (canonical) collectFiles(kid, canonical, simpleFt, items);
+      }
+    }
+  }
+  return items;
 }
 
 
@@ -357,6 +487,23 @@ function collectFiles(propFolder, property, ft, items) {
 function getOrCreate(parent, name) {
   const it = parent.getFoldersByName(name);
   return it.hasNext() ? it.next() : parent.createFolder(name);
+}
+
+/** Resolves (creating if needed) Root/Category[/Sub]/Property with the folder
+ *  id cached for 6 hours — repeat uploads skip three folder lookups. */
+function resolveUploadFolder(ft, property) {
+  const cache = CacheService.getScriptCache();
+  const key = 'fid|' + ft.category + '|' + ft.sub + '|' + property;
+  const hit = cache.get(key);
+  if (hit) {
+    try { return DriveApp.getFolderById(hit); } catch (gone) { /* re-resolve below */ }
+  }
+  const root = DriveApp.getFolderById(CONFIG.ROOT_FOLDER_ID);
+  let typeFolder = getOrCreate(root, ft.category);
+  if (ft.sub) typeFolder = getOrCreate(typeFolder, ft.sub);
+  const propFolder = getOrCreate(typeFolder, property);
+  try { cache.put(key, propFolder.getId(), 21600); } catch (ignore) {}
+  return propFolder;
 }
 
 function sanitize(name) {

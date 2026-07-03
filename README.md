@@ -173,6 +173,22 @@ Other handy URL patterns (the site understands these anywhere):
 
 ---
 
+## Performance
+
+The portal is built to feel instant:
+
+- The website remembers your property/type lists and the dashboard's last data
+  on-device, paints immediately, and refreshes silently in the background.
+- Uploads run three at a time, and the backend caches folder locations.
+- The dashboard listing is served from a 10-minute server cache (portal uploads
+  clear it automatically; the **↻ Refresh** button always reads Drive live).
+- **Recommended:** in the Apps Script editor, click **Services (+) → Drive API
+  → Add**. The backend then reads whole folder levels in a handful of batched
+  calls (fresh loads in ~2-4s no matter how many files you accumulate). Without
+  it, a slower folder-by-folder fallback is used automatically.
+
+---
+
 ## Security notes (worth understanding)
 
 - Uploads are open by design (you wanted "anyone can upload"). Setting

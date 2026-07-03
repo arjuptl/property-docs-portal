@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="robots" content="noindex" />
+  <link rel="preconnect" href="https://script.google.com" crossorigin />
+  <link rel="preconnect" href="https://script.googleusercontent.com" crossorigin />
   <title>Share links — Property Documents Portal</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏨</text></svg>" />
   <link rel="stylesheet" href="./styles.css" />
@@ -105,10 +107,25 @@
       });
     }
 
+    // Paint instantly from the config the main page already cached.
+    try {
+      var cachedCfg = JSON.parse(localStorage.getItem('portal_cfg_v1') || 'null');
+      if (cachedCfg && cachedCfg.api === API && cachedCfg.res) renderShare(cachedCfg.res);
+    } catch (ignore) {}
+
     fetch(API, { method: 'POST', body: JSON.stringify({ action: 'config' }) })
       .then(function (r) { return r.json(); })
       .then(function (res) {
         if (!res.ok) throw new Error(res.error || 'config failed');
+        try { localStorage.setItem('portal_cfg_v1', JSON.stringify({ api: API, res: res })); } catch (ignore) {}
+        renderShare(res);
+      })
+      .catch(function (err) {
+        $('banner').textContent = 'Could not load the property list (' + err.message + '). The dashboard link above still works.';
+        $('banner').classList.add('show');
+      });
+
+    function renderShare(res) {
         // flatTypes has "Inspection — Fire"-style labels; older backends only send docTypes.
         var props = res.properties || [], types = res.flatTypes || res.docTypes || [];
 
@@ -120,7 +137,9 @@
                  '<button class="ghost" data-copy="pl' + i + '">Copy</button></div></div>';
         }).join('');
 
-        // link builder
+        // link builder (reset first — this can render twice: cached, then fresh)
+        $('bProp').innerHTML = '<option value="">Any (staff picks)</option>';
+        $('bType').innerHTML = '<option value="">Any (staff picks)</option>';
         props.forEach(function (p) { $('bProp').appendChild(new Option(p, p)); });
         types.forEach(function (t) { $('bType').appendChild(new Option(t.name, t.name)); });
         function buildOut() { $('bOut').value = link($('bProp').value, $('bType').value, $('bLock').checked); }
@@ -138,11 +157,7 @@
             '<div class="qurl">' + esc(u) + '</div>' +
           '</div>';
         }).join('');
-      })
-      .catch(function (err) {
-        $('banner').textContent = 'Could not load the property list (' + err.message + '). The dashboard link above still works.';
-        $('banner').classList.add('show');
-      });
+    }
 
     // copy buttons (event delegation covers rows added after load)
     document.addEventListener('click', function (e) {

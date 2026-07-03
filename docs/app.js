@@ -56,24 +56,37 @@
   }
 
   /* ----------------------------- bootstrap ------------------------------ */
+  var CFG_CACHE_KEY = 'portal_cfg_v1';
+
+  function applyConfig(res) {
+    state.properties = res.properties || [];
+    state.docTypes = res.docTypes || [];
+    state.flat = normalizeFlat(res.flatTypes || res.docTypes || []);
+    state.uploadRequiresKey = !!res.uploadRequiresKey;
+    state.maxFileMb = res.maxFileMb || 40;
+    populateDropdowns();
+  }
+
   function boot() {
     initNav();
     if (!configured) { $('configBanner').classList.add('show'); return; }
     $('orgName').textContent = CFG.ORG_NAME || 'Property Documents Portal';
     document.title = (CFG.ORG_NAME ? CFG.ORG_NAME + ' — ' : '') + 'Documents Portal';
 
+    // Paint instantly from the last-known config; refresh silently in the
+    // background and only re-render if something actually changed.
+    var cached = null;
+    try { cached = JSON.parse(localStorage.getItem(CFG_CACHE_KEY) || 'null'); } catch (ignore) {}
+    if (cached && cached.api === API && cached.res) applyConfig(cached.res);
+
     api({ action: 'config' })
       .then(function (res) {
         if (!res.ok) throw new Error(res.error || 'Could not load config');
-        state.properties = res.properties || [];
-        state.docTypes = res.docTypes || [];
-        state.flat = normalizeFlat(res.flatTypes || res.docTypes || []);
-        state.uploadRequiresKey = !!res.uploadRequiresKey;
-        state.maxFileMb = res.maxFileMb || 40;
-        populateDropdowns();
+        try { localStorage.setItem(CFG_CACHE_KEY, JSON.stringify({ api: API, res: res })); } catch (ignore) {}
+        if (!cached || JSON.stringify(cached.res) !== JSON.stringify(res)) applyConfig(res);
       })
       .catch(function (err) {
-        showMsg('uploadMsg', 'error', 'Could not reach the server. Check API_URL and that the Apps Script is deployed for "Anyone". (' + err.message + ')');
+        if (!cached) showMsg('uploadMsg', 'error', 'Could not reach the server. Check API_URL and that the Apps Script is deployed for "Anyone". (' + err.message + ')');
       });
 
     initUpload();
@@ -93,6 +106,7 @@
     var fp = $('filterProperty');
     prop.innerHTML = '<option value="">Select a property…</option>';
     dt.innerHTML = '<option value="">Select a document type…</option>';
+    fp.innerHTML = '<option value="">All properties</option>';   // reset: this can run twice (cache, then fresh)
     state.properties.forEach(function (p) {
       prop.appendChild(opt(p, p));
       fp.appendChild(opt(p, p));
@@ -244,24 +258,30 @@
 
     showMsg('uploadMsg', 'info', '<span class="spin"></span>Uploading 0 / ' + total + '…');
 
-    // Upload files one at a time (keeps payloads small and progress clear).
-    var queue = state.files.slice();
-    function next() {
-      if (!queue.length) return finish();
-      var f = queue.shift();
+    // Upload up to 3 files at once — multi-file batches finish about 3x sooner
+    // than one-at-a-time, and Apps Script handles parallel requests fine.
+    var queue = state.files.slice(), active = 0, finished = false;
+    function progress() {
+      showMsg('uploadMsg', 'info', '<span class="spin"></span>Uploading ' + (done + failed.length) + ' / ' + total + '…');
+    }
+    function startOne(f) {
+      active++;
       fileToBase64(f).then(function (b64) {
-        var payload = Object.assign({}, common, {
-          fileName: f.name, mimeType: f.type, dataBase64: b64,
-        });
-        return api(payload);
+        return api(Object.assign({}, common, { fileName: f.name, mimeType: f.type, dataBase64: b64 }));
       }).then(function (res) {
         if (res.ok) { done++; } else { failed.push(f.name + ': ' + res.error); }
-        showMsg('uploadMsg', 'info', '<span class="spin"></span>Uploading ' + (done + failed.length) + ' / ' + total + '…');
-        next();
       }).catch(function (err) {
         failed.push(f.name + ': ' + err.message);
-        next();
+      }).then(function () {
+        active--; progress(); next();
       });
+    }
+    function next() {
+      if (!queue.length && active === 0) {
+        if (!finished) { finished = true; finish(); }
+        return;
+      }
+      while (active < 3 && queue.length) startOne(queue.shift());
     }
 
     function finish() {
@@ -294,22 +314,64 @@
     $('modalBg').addEventListener('click', function (e) { if (e.target === $('modalBg')) closeModal(); });
   }
 
+  var LIST_CACHE_KEY = 'portal_list_v1';
+
+  function shaHex(s) {
+    try {
+      return crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)).then(function (buf) {
+        return Array.prototype.map.call(new Uint8Array(buf), function (x) {
+          return ('0' + x.toString(16)).slice(-2);
+        }).join('');
+      });
+    } catch (e) { return Promise.resolve(null); }
+  }
+
+  function showBoard() {
+    $('lockMsg').classList.remove('show');
+    $('lock').style.display = 'none';
+    $('board').style.display = '';
+  }
+
+  function storeList(hash, res) {
+    if (!hash) return;
+    try { sessionStorage.setItem(LIST_CACHE_KEY, JSON.stringify({ h: hash, res: res })); } catch (ignore) {}
+  }
+
   function unlock() {
     var pc = $('passcode').value.trim();
     if (!pc) return;
     $('unlockBtn').disabled = true;
     showMsg('lockMsg', 'info', '<span class="spin"></span>Checking…');
     state.passcode = pc;
-    api({ action: 'list', passcode: pc }).then(function (res) {
-      $('unlockBtn').disabled = false;
-      if (!res.ok) { state.passcode = ''; return showMsg('lockMsg', 'error', res.error || 'Wrong passcode.'); }
-      $('lockMsg').classList.remove('show');
-      $('lock').style.display = 'none';
-      $('board').style.display = '';
-      applyListResult(res);
-    }).catch(function (err) {
-      $('unlockBtn').disabled = false;
-      showMsg('lockMsg', 'error', 'Could not reach the server (' + err.message + ').');
+
+    shaHex(pc).then(function (hash) {
+      // Instant paint if this tab already loaded the dashboard with this
+      // passcode — then verify + refresh in the background.
+      var cached = null;
+      try { cached = JSON.parse(sessionStorage.getItem(LIST_CACHE_KEY) || 'null'); } catch (ignore) {}
+      var painted = !!(hash && cached && cached.h === hash && cached.res);
+      if (painted) {
+        showBoard();
+        applyListResult(cached.res);
+        $('genAt').textContent += ' · refreshing…';
+      }
+
+      api({ action: 'list', passcode: pc }).then(function (res) {
+        $('unlockBtn').disabled = false;
+        if (!res.ok) {
+          state.passcode = '';
+          try { sessionStorage.removeItem(LIST_CACHE_KEY); } catch (ignore) {}
+          if (painted) { $('board').style.display = 'none'; $('lock').style.display = ''; }
+          return showMsg('lockMsg', 'error', res.error || 'Wrong passcode.');
+        }
+        storeList(hash, res);
+        showBoard();
+        applyListResult(res);
+      }).catch(function (err) {
+        $('unlockBtn').disabled = false;
+        if (!painted) showMsg('lockMsg', 'error', 'Could not reach the server (' + err.message + ').');
+        else $('genAt').textContent = $('genAt').textContent.replace(' · refreshing…', ' · offline copy');
+      });
     });
   }
 
@@ -320,7 +382,11 @@
     // Explicit refresh always bypasses the server cache (covers files dropped
     // straight into Drive, which don't clear it the way portal uploads do).
     api({ action: 'list', passcode: state.passcode, noCache: true })
-      .then(function (res) { if (res.ok) applyListResult(res); })
+      .then(function (res) {
+        if (!res.ok) return;
+        applyListResult(res);
+        shaHex(state.passcode).then(function (h) { storeList(h, res); });
+      })
       .catch(function () {})
       .then(function () { btn.disabled = false; btn.textContent = '↻ Refresh'; });
   }
