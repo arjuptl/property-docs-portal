@@ -70,8 +70,11 @@ const CONFIG = {
   //      { name: 'Inspection', subs: [ {...}, {...} ] }   ← category with subcategories
   //    renewalMonths drives the compliance colors on the dashboard (e.g. a fire
   //    inspection is due again 12 months after its date). 0 = never expires.
+  //    dueSoonDays (optional) = how many days before the due date the cell turns
+  //    amber. Set it on a category to cover all its subs, or on a single sub.
+  //    Types without it use the website default (DUE_SOON_DAYS in config.js).
   DOC_TYPES: [
-    { name: 'Inspection', subs: [
+    { name: 'Inspection', dueSoonDays: 45, subs: [
         { name: 'Fire',       renewalMonths: 12 },
         { name: 'Health',     renewalMonths: 12 },
         { name: 'Elevator',   renewalMonths: 12 },
@@ -86,8 +89,8 @@ const CONFIG = {
     { name: 'Monthly Star',          renewalMonths: 1  },
     { name: 'Monthly Statistic',     renewalMonths: 1  },
     { name: 'Credit Card Statement', renewalMonths: 1  },
-    { name: 'Insurance',             renewalMonths: 12 },
-    { name: 'Licenses & Permits',    renewalMonths: 12 },
+    { name: 'Insurance',             renewalMonths: 12, dueSoonDays: 45 },
+    { name: 'Licenses & Permits',    renewalMonths: 12, dueSoonDays: 45 },
     { name: 'Contract', subs: [
         { name: 'Cable/internet',      renewalMonths: 0 },
         { name: 'Pest Control',        renewalMonths: 0 },
@@ -142,11 +145,13 @@ function flatTypes() {
     if (t.subs && t.subs.length) {
       t.subs.forEach(function (s) {
         out.push({ category: t.name, sub: s.name, label: t.name + ' — ' + s.name,
-                   renewalMonths: s.renewalMonths || 0 });
+                   renewalMonths: s.renewalMonths || 0,
+                   dueSoonDays: (s.dueSoonDays != null ? s.dueSoonDays : t.dueSoonDays) });
       });
     } else {
       out.push({ category: t.name, sub: '', label: t.name,
-                 renewalMonths: t.renewalMonths || 0 });
+                 renewalMonths: t.renewalMonths || 0,
+                 dueSoonDays: t.dueSoonDays });
     }
   });
   return out;
@@ -184,7 +189,7 @@ function handleConfig() {
     properties: CONFIG.PROPERTIES,
     docTypes: CONFIG.DOC_TYPES,     // nested — the upload form builds its dropdowns from this
     flatTypes: flatTypes().map(function (f) {
-      return { name: f.label, category: f.category, sub: f.sub, renewalMonths: f.renewalMonths };
+      return { name: f.label, category: f.category, sub: f.sub, renewalMonths: f.renewalMonths, dueSoonDays: f.dueSoonDays };
     }),
     uploadRequiresKey: !!CONFIG.UPLOAD_KEY,
     maxFileMb: CONFIG.MAX_FILE_MB,
@@ -289,7 +294,7 @@ function handleList(b) {
     generatedAt: new Date().toISOString(),
     properties: CONFIG.PROPERTIES,
     docTypes: flats.map(function (f) {
-      return { name: f.label, category: f.category, sub: f.sub, renewalMonths: f.renewalMonths };
+      return { name: f.label, category: f.category, sub: f.sub, renewalMonths: f.renewalMonths, dueSoonDays: f.dueSoonDays };
     }),
     items: items,
   };

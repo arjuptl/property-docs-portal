@@ -169,6 +169,11 @@ Other handy URL patterns (the site understands these anywhere):
 
   On the dashboard and in share links these appear as `Inspection — Fire`.
 - **Change renewal periods:** edit `renewalMonths` (`0` = never expires).
+- **Per-type warning windows:** add `dueSoonDays` to any type (or to a category,
+  covering all its subs) to control how many days before the due date its cells
+  turn amber — e.g. `{ name: 'Inspection', dueSoonDays: 45, subs: […] }` warns
+  45 days out for inspections you must book, while monthlies keep the site-wide
+  default (`DUE_SOON_DAYS` in `config.js`).
 - **Change "due soon" window:** `DUE_SOON_DAYS` in `config.js`.
 
 ---

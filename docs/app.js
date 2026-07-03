@@ -97,7 +97,8 @@
   function normalizeFlat(list) {
     return (list || []).map(function (t) {
       return { name: t.name, category: t.category || t.name, sub: t.sub || '',
-               renewalMonths: t.renewalMonths || 0 };
+               renewalMonths: t.renewalMonths || 0,
+               dueSoonDays: (t.dueSoonDays == null ? null : t.dueSoonDays) };
     });
   }
 
@@ -423,8 +424,11 @@
     if (!renewal) return { key: 'ok', label: 'On file', date: latest };
     var due = addMonths(new Date(latest), renewal);
     var days = Math.round((due - new Date()) / 86400000);
+    // Per-type warning window (dueSoonDays in the Apps Script config) wins;
+    // types without one use the site-wide default.
+    var warnDays = (docType && docType.dueSoonDays != null) ? docType.dueSoonDays : DUE_SOON_DAYS;
     if (days < 0) return { key: 'overdue', label: 'Overdue', date: latest };
-    if (days <= DUE_SOON_DAYS) return { key: 'due', label: 'Due soon', date: latest };
+    if (days <= warnDays) return { key: 'due', label: 'Due soon', date: latest };
     return { key: 'ok', label: 'Current', date: latest };
   }
 
