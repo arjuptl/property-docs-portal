@@ -221,6 +221,12 @@ function handleUpload(b) {
     uploadedAt: new Date().toISOString(),
   }));
 
+  // A new file makes any cached dashboard listing stale — clear it.
+  try {
+    CacheService.getScriptCache()
+      .remove('list-v2-' + flatTypes().length + '-' + CONFIG.PROPERTIES.length);
+  } catch (ignore) {}
+
   return { ok: true, fileName: finalName, url: file.getUrl() };
 }
 
@@ -230,47 +236,94 @@ function handleList(b) {
   if (b.passcode !== CONFIG.ADMIN_PASSCODE) {
     return { ok: false, error: 'Wrong passcode.' };
   }
-  const root = DriveApp.getFolderById(CONFIG.ROOT_FOLDER_ID);
-  const items = [];
 
-  flatTypes().forEach(function (ft) {
-    let typeFolder = findChild(root, ft.category);
-    if (typeFolder && ft.sub) typeFolder = findChild(typeFolder, ft.sub);
-    if (!typeFolder) return;
-    CONFIG.PROPERTIES.forEach(function (prop) {
-      const propFolder = findChild(typeFolder, prop);
-      if (!propFolder) return;
-      const files = propFolder.getFiles();
-      while (files.hasNext()) {
-        const f = files.next();
-        let meta = {};
-        try { meta = JSON.parse(f.getDescription() || '{}'); } catch (ignore) {}
-        items.push({
-          property: prop,
-          docType: ft.label,      // composite, e.g. "Inspection — Fire"
-          category: ft.category,
-          sub: ft.sub,
-          fileName: f.getName(),
-          url: f.getUrl(),
-          sizeKB: Math.round(f.getSize() / 1024),
-          reportDate: meta.reportDate || '',
-          uploadedBy: meta.uploadedBy || '',
-          note: meta.note || '',
-          uploadedAt: meta.uploadedAt || f.getDateCreated().toISOString(),
-        });
-      }
-    });
+  const flats = flatTypes();
+  // Cache key includes the config shape, so redeploying with new types or
+  // properties doesn't serve a stale layout for the next 10 minutes.
+  const cacheKey = 'list-v2-' + flats.length + '-' + CONFIG.PROPERTIES.length;
+  const cache = CacheService.getScriptCache();
+  if (!b.noCache) {
+    const hit = cache.get(cacheKey);
+    if (hit) {
+      const cached = JSON.parse(hit);
+      cached.cached = true;
+      return cached;
+    }
+  }
+
+  // Walk only the folders that actually exist (one listing per folder) instead
+  // of probing every Category × Sub × Property combination by name — that was
+  // hundreds of Drive lookups and the reason the dashboard crawled.
+  const propByLower = {};
+  CONFIG.PROPERTIES.forEach(function (p) { propByLower[p.toLowerCase()] = p; });
+  const ftByKey = {};
+  flats.forEach(function (f) {
+    ftByKey[(f.category + '\u0000' + f.sub).toLowerCase()] = f;
   });
 
-  return {
+  const items = [];
+  const root = DriveApp.getFolderById(CONFIG.ROOT_FOLDER_ID);
+  const cats = root.getFolders();
+  while (cats.hasNext()) {
+    const catFolder = cats.next();
+    const catName = catFolder.getName();
+    const simpleFt = ftByKey[(catName + '\u0000').toLowerCase()];
+    const kids = catFolder.getFolders();
+    while (kids.hasNext()) {
+      const kid = kids.next();
+      const kidName = kid.getName();
+      const subFt = ftByKey[(catName + '\u0000' + kidName).toLowerCase()];
+      if (subFt) {
+        // kid is a subcategory folder — its children are property folders
+        const propFolders = kid.getFolders();
+        while (propFolders.hasNext()) {
+          const pf = propFolders.next();
+          const canonical = propByLower[pf.getName().toLowerCase()];
+          if (canonical) collectFiles(pf, canonical, subFt, items);
+        }
+      } else if (simpleFt) {
+        // kid is a property folder directly under a simple category
+        const canonical = propByLower[kidName.toLowerCase()];
+        if (canonical) collectFiles(kid, canonical, simpleFt, items);
+      }
+    }
+  }
+
+  const out = {
     ok: true,
     generatedAt: new Date().toISOString(),
     properties: CONFIG.PROPERTIES,
-    docTypes: flatTypes().map(function (f) {
+    docTypes: flats.map(function (f) {
       return { name: f.label, category: f.category, sub: f.sub, renewalMonths: f.renewalMonths };
     }),
     items: items,
   };
+  try { cache.put(cacheKey, JSON.stringify(out), 600); } catch (tooBig) { /* >100KB: serve live only */ }
+  return out;
+}
+
+
+/** Pushes one dashboard row per file in a property folder. */
+function collectFiles(propFolder, property, ft, items) {
+  const files = propFolder.getFiles();
+  while (files.hasNext()) {
+    const f = files.next();
+    let meta = {};
+    try { meta = JSON.parse(f.getDescription() || '{}'); } catch (ignore) {}
+    items.push({
+      property: property,
+      docType: ft.label,      // composite, e.g. "Inspection — Fire"
+      category: ft.category,
+      sub: ft.sub,
+      fileName: f.getName(),
+      url: f.getUrl(),
+      sizeKB: Math.round(f.getSize() / 1024),
+      reportDate: meta.reportDate || '',
+      uploadedBy: meta.uploadedBy || '',
+      note: meta.note || '',
+      uploadedAt: meta.uploadedAt || f.getDateCreated().toISOString(),
+    });
+  }
 }
 
 
@@ -279,11 +332,6 @@ function handleList(b) {
 function getOrCreate(parent, name) {
   const it = parent.getFoldersByName(name);
   return it.hasNext() ? it.next() : parent.createFolder(name);
-}
-
-function findChild(parent, name) {
-  const it = parent.getFoldersByName(name);
-  return it.hasNext() ? it.next() : null;
 }
 
 function sanitize(name) {

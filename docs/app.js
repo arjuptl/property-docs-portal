@@ -317,7 +317,9 @@
     if (!state.passcode) return;
     var btn = $('refreshBtn');
     btn.disabled = true; btn.textContent = 'Refreshing…';
-    api({ action: 'list', passcode: state.passcode })
+    // Explicit refresh always bypasses the server cache (covers files dropped
+    // straight into Drive, which don't clear it the way portal uploads do).
+    api({ action: 'list', passcode: state.passcode, noCache: true })
       .then(function (res) { if (res.ok) applyListResult(res); })
       .catch(function () {})
       .then(function () { btn.disabled = false; btn.textContent = '↻ Refresh'; });
@@ -331,7 +333,8 @@
     });
     if (res.docTypes) { state.flat = normalizeFlat(res.docTypes); refreshTypeFilter(); }
     if (res.properties) state.properties = res.properties;
-    $('genAt').textContent = 'Updated ' + new Date(res.generatedAt).toLocaleString();
+    $('genAt').textContent = 'Updated ' + new Date(res.generatedAt).toLocaleString() +
+                             (res.cached ? ' · cached' : '');
     render();
   }
 
