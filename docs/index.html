@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Property Documents Portal</title>
+  <meta name="robots" content="noindex" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏨</text></svg>" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
@@ -33,6 +35,7 @@
           <div class="field">
             <label for="property">Property</label>
             <select id="property"><option value="">Loading…</option></select>
+            <div class="hint" id="propertyNote" style="display:none; margin-top:6px;"></div>
           </div>
           <div class="field">
             <label for="docType">Document type</label>
@@ -68,6 +71,8 @@
             <span class="hint" id="dropHint">PDF, images, Word, Excel…</span>
           </div>
           <input type="file" id="fileInput" multiple style="display:none;" />
+          <input type="file" id="cameraInput" accept="image/*" capture="environment" style="display:none;" />
+          <button type="button" class="ghost" id="cameraBtn" style="margin-top:8px;">📷 Take a photo instead</button>
           <div id="fileList" class="filelist"></div>
         </div>
 
@@ -100,6 +105,7 @@
           <select id="filterDocType"><option value="">All document types</option></select>
           <label class="toggle"><input type="checkbox" id="onlyProblems" /> Only needs attention</label>
           <span class="spacer"></span>
+          <a class="ghost" href="./share.html">🔗 Share links</a>
           <button class="ghost" id="exportBtn">Export CSV</button>
           <button class="ghost" id="refreshBtn">↻ Refresh</button>
         </div>
@@ -113,6 +119,12 @@
           <span><i class="swatch" style="background:var(--over-bg)"></i> Overdue</span>
           <span><i class="swatch" style="background:var(--missing-bg)"></i> Missing</span>
           <span id="genAt" style="margin-left:auto;"></span>
+        </div>
+
+        <div class="card" style="margin-top:18px;">
+          <h3 style="margin:0 0 6px;">Recent uploads</h3>
+          <p class="hint" style="margin:0 0 8px;">Newest first — the search box and filters above apply here.</p>
+          <div id="recentList"></div>
         </div>
       </div>
     </section>

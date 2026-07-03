@@ -20,6 +20,8 @@
 
   var $ = function (id) { return document.getElementById(id); };
   var configured = API && API.indexOf('PASTE_') === -1;
+  // Deep-link support: ?property=X&type=Y&lock=1 pre-fills (and locks) the form.
+  var params = new URLSearchParams(location.search);
 
   /* -------------------------- tiny API client --------------------------- *
    * POST with a plain-string body and NO custom headers. The browser then
@@ -36,16 +38,20 @@
   }
 
   /* ------------------------------- nav ---------------------------------- */
-  function initNav() {
-    var tabs = document.querySelectorAll('.tab');
-    tabs.forEach(function (t) {
-      t.addEventListener('click', function () {
-        tabs.forEach(function (x) { x.classList.remove('active'); });
-        t.classList.add('active');
-        document.querySelectorAll('.view').forEach(function (v) { v.classList.remove('active'); });
-        $('view-' + t.dataset.view).classList.add('active');
-      });
+  function activateTab(name) {
+    document.querySelectorAll('.tab').forEach(function (x) {
+      x.classList.toggle('active', x.dataset.view === name);
     });
+    document.querySelectorAll('.view').forEach(function (v) { v.classList.remove('active'); });
+    $('view-' + name).classList.add('active');
+    // Keep the URL shareable: managers can bookmark …/#dashboard directly.
+    history.replaceState(null, '', location.pathname + location.search + (name === 'dashboard' ? '#dashboard' : ''));
+  }
+  function initNav() {
+    document.querySelectorAll('.tab').forEach(function (t) {
+      t.addEventListener('click', function () { activateTab(t.dataset.view); });
+    });
+    if (location.hash === '#dashboard') activateTab('dashboard');
   }
 
   /* ----------------------------- bootstrap ------------------------------ */
@@ -87,6 +93,30 @@
     });
     if (state.uploadRequiresKey) $('uploadKeyField').style.display = '';
     $('dropHint').textContent = 'PDF, images, Word, Excel… up to ' + state.maxFileMb + 'MB each';
+    applyLinkPresets();
+  }
+
+  /* Pre-select property/doc-type from a share link, e.g.
+     ?property=Hampton%20Inn%20Sturgis&lock=1&type=Fire%20Inspection  */
+  function applyLinkPresets() {
+    var wantP = (params.get('property') || '').trim().toLowerCase();
+    var wantT = (params.get('type') || '').trim().toLowerCase();
+    if (wantP) {
+      var prop = state.properties.filter(function (p) { return p.toLowerCase() === wantP; })[0];
+      if (prop) {
+        $('property').value = prop;
+        if (params.get('lock') === '1') {
+          $('property').disabled = true;
+          var note = $('propertyNote');
+          note.textContent = '🔒 This link files everything under “' + prop + '”.';
+          note.style.display = '';
+        }
+      }
+    }
+    if (wantT) {
+      var dt = state.docTypes.filter(function (d) { return d.name.toLowerCase() === wantT; })[0];
+      if (dt) $('docType').value = dt.name;
+    }
   }
 
   function opt(value, label) {
@@ -107,7 +137,17 @@
       drop.addEventListener(e, function (ev) { ev.preventDefault(); drop.classList.remove('over'); });
     });
     drop.addEventListener('drop', function (ev) { addFiles(ev.dataTransfer.files); });
+    $('cameraBtn').addEventListener('click', function () { $('cameraInput').click(); });
+    $('cameraInput').addEventListener('change', function () { addFiles($('cameraInput').files); });
     $('uploadBtn').addEventListener('click', doUpload);
+
+    // Remember the uploader's name on this device.
+    try {
+      $('uploadedBy').value = localStorage.getItem('portal_name') || '';
+      $('uploadedBy').addEventListener('input', function () {
+        localStorage.setItem('portal_name', $('uploadedBy').value);
+      });
+    } catch (ignore) { /* private browsing */ }
   }
 
   function addFiles(fileList) {
@@ -233,10 +273,12 @@
 
   function loadList() {
     if (!state.passcode) return;
-    showMsg('lockMsg', 'info', '');
-    api({ action: 'list', passcode: state.passcode }).then(function (res) {
-      if (res.ok) applyListResult(res);
-    });
+    var btn = $('refreshBtn');
+    btn.disabled = true; btn.textContent = 'Refreshing…';
+    api({ action: 'list', passcode: state.passcode })
+      .then(function (res) { if (res.ok) applyListResult(res); })
+      .catch(function () {})
+      .then(function () { btn.disabled = false; btn.textContent = '↻ Refresh'; });
   }
 
   function applyListResult(res) {
@@ -272,11 +314,30 @@
   }
 
   function render() {
-    var filtered = filterItems(state.items);
     var groups = groupItems(state.items);     // matrix always reflects everything
     renderStats(groups);
     renderMatrix(groups);
-    void filtered; // (search/table filtering happens inside the modal + CSV)
+    renderRecent(filterItems(state.items));   // search + filters shape this list
+  }
+
+  function renderRecent(items) {
+    var list = items.slice()
+      .sort(function (a, b) { return (b.uploadedAt || '').localeCompare(a.uploadedAt || ''); })
+      .slice(0, 15);
+    var box = $('recentList');
+    if (!list.length) {
+      box.innerHTML = '<p class="muted">No uploads match the current filters.</p>';
+      return;
+    }
+    box.innerHTML = list.map(function (it) {
+      return '<div class="rrow">' +
+        '<span class="rdate">' + (it.uploadedAt || '').slice(0, 10) + '</span>' +
+        '<span class="rmain">' +
+          '<a href="' + escapeAttr(it.url) + '" target="_blank" rel="noopener">' + escapeHtml(it.fileName) + '</a>' +
+          '<span class="rsub">' + escapeHtml(it.property) + ' · ' + escapeHtml(it.docType) +
+            (it.uploadedBy ? ' · by ' + escapeHtml(it.uploadedBy) : '') + '</span>' +
+        '</span></div>';
+    }).join('');
   }
 
   function filterItems(items) {

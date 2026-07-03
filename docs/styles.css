@@ -182,3 +182,14 @@ table.matrix tbody th { text-align: left; background: #f8fafc; position: sticky;
 .spin { display: inline-block; width: 16px; height: 16px; border: 2px solid #fff; border-top-color: transparent;
         border-radius: 50%; animation: spin .7s linear infinite; vertical-align: -3px; margin-right: 6px; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- share links + recent uploads ---------- */
+a.ghost { text-decoration: none; display: inline-block; }
+.rrow { display: flex; gap: 14px; padding: 10px 2px; border-top: 1px solid var(--line); align-items: baseline; }
+.rrow:first-child { border-top: 0; }
+.rdate { color: var(--muted); font-size: .82rem; white-space: nowrap; }
+.rmain { display: flex; flex-direction: column; min-width: 0; }
+.rmain a { word-break: break-word; }
+.rsub { color: var(--muted); font-size: .8rem; }
+.linkrow { display: flex; gap: 8px; margin-top: 8px; }
+.linkrow input { flex: 1; font-size: .85rem; color: var(--muted); }

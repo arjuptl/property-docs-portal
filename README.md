@@ -129,6 +129,25 @@ Already have old reports? Just drop them into the matching
 `Document Type / Property` folders in Drive — they'll show up on the dashboard
 (using the file's date if you didn't upload them through the form).
 
+### Sharing it with the team
+
+Open **`share.html`** on your live site (or click **🔗 Share links** on the
+dashboard). It generates, for every property:
+
+- a **pre-locked upload link** — e.g. `…/?property=Hampton%20Inn%20Sturgis&lock=1`
+  — the property is pre-selected and can't be changed, so staff can't file
+  documents under the wrong hotel, and
+- a **printable QR card** for the front desk / back office — staff point their
+  phone camera at it and they're on the upload form.
+
+Other handy URL patterns (the site understands these anywhere):
+
+| Link | What it does |
+|---|---|
+| `…/#dashboard` | Opens straight to the manager dashboard (passcode still required) |
+| `…/?property=X&lock=1` | Upload form locked to property X |
+| `…/?property=X&lock=1&type=Fire%20Inspection` | …and with a document type pre-selected |
+
 ---
 
 ## Customizing
@@ -204,6 +223,7 @@ property-docs-portal/
 ├── README.md                 ← you are here
 ├── docs/                     ← the website (GitHub Pages serves this folder)
 │   ├── index.html
+│   ├── share.html            ← per-property share links + printable QR cards
 │   ├── config.js             ← the ONLY website file you edit (API_URL)
 │   ├── app.js
 │   └── styles.css

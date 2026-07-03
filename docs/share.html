@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex" />
+  <title>Share links — Property Documents Portal</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏨</text></svg>" />
+  <link rel="stylesheet" href="./styles.css" />
+  <style>
+    h3 { margin: 0 0 6px; }
+    .proplink { padding: 12px 0; border-top: 1px solid var(--line); }
+    .proplink:first-child { border-top: 0; }
+    .proplink .pname { font-weight: 600; }
+    .copied { color: var(--ok) !important; font-weight: 700; }
+    .qr-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 18px; margin-top: 18px; }
+    .qcard { background: #fff; border: 2px solid var(--ink); border-radius: 14px; padding: 22px; text-align: center;
+             page-break-inside: avoid; break-inside: avoid; }
+    .qcard .qorg { font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+    .qcard .qprop { font-size: 1.25rem; font-weight: 700; margin: 4px 0 12px; }
+    .qcard img { width: 200px; height: 200px; }
+    .qcard .qhow { font-size: .9rem; margin-top: 12px; }
+    .qcard .qurl { font-size: .72rem; color: var(--muted); margin-top: 8px; word-break: break-all; }
+    @media print {
+      header, main > h1, main > .sub, .card, .msg { display: none !important; }
+      body { background: #fff; }
+      main { max-width: none; padding: 0; }
+      .qr-cards { grid-template-columns: 1fr 1fr; gap: 28px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <div class="brand"><span class="dot">●</span> <span id="orgName">Documents Portal</span> — share links</div>
+      <nav><a class="tab" href="./index.html" style="text-decoration:none;">← Back to portal</a></nav>
+    </div>
+  </header>
+
+  <main>
+    <h1>Share these links</h1>
+    <p class="sub">Every property gets its own upload link — pre-selected and locked, so nothing gets filed under the wrong hotel. Print the QR cards for each front desk.</p>
+
+    <div id="banner" class="msg error">⚠️ Not connected — set <code>API_URL</code> in <code>config.js</code>.</div>
+
+    <div class="card">
+      <h3>🏨 Staff — one upload link per property</h3>
+      <p class="muted" style="margin:4px 0 6px;">Text it to the GM / front desk or pin it in each property's group chat.</p>
+      <div id="propLinks" class="muted">Loading properties…</div>
+    </div>
+
+    <div class="card">
+      <h3>👔 Managers — the dashboard</h3>
+      <p class="muted" style="margin:4px 0 0;">Only for the select few. They'll also need the passcode — share that separately (call or text, not a group chat).</p>
+      <div class="linkrow"><input readonly id="mgrLink" /><button class="ghost" data-copy="mgrLink">Copy</button></div>
+    </div>
+
+    <div class="card">
+      <h3>🔧 Link builder <span class="hint">(optional)</span></h3>
+      <p class="muted" style="margin:4px 0 10px;">Make a special-purpose link — e.g. "Fire Inspection uploads for Hampton Inn Sturgis".</p>
+      <div class="row">
+        <div class="field" style="margin-bottom:8px;"><label>Property</label><select id="bProp"><option value="">Any (staff picks)</option></select></div>
+        <div class="field" style="margin-bottom:8px;"><label>Document type</label><select id="bType"><option value="">Any (staff picks)</option></select></div>
+      </div>
+      <label class="toggle" style="margin-bottom:8px;"><input type="checkbox" id="bLock" checked /> Lock the property (recommended)</label>
+      <div class="linkrow"><input readonly id="bOut" /><button class="ghost" data-copy="bOut">Copy</button></div>
+    </div>
+
+    <div class="card" style="text-align:center;">
+      <button class="primary" onclick="window.print()">🖨️ Print QR cards</button>
+      <p class="muted" style="margin:8px 0 0;">One card per property — post it at the front desk / back office. Staff point their phone camera at it and upload in seconds.</p>
+    </div>
+
+    <div id="qrCards" class="qr-cards"></div>
+  </main>
+
+  <script src="./config.js"></script>
+  <script>
+  (function () {
+    'use strict';
+    var CFG = window.PORTAL_CONFIG || {};
+    var API = CFG.API_URL || '';
+    var configured = API && API.indexOf('PASTE_') === -1;
+    var BASE = location.href.replace(/share\.html.*$/, '');
+    var $ = function (id) { return document.getElementById(id); };
+
+    $('orgName').textContent = CFG.ORG_NAME || 'Documents Portal';
+    if (!configured) { $('banner').classList.add('show'); return; }
+
+    $('mgrLink').value = BASE + '#dashboard';
+
+    function link(prop, type, lock) {
+      var q = [];
+      if (prop) q.push('property=' + encodeURIComponent(prop));
+      if (type) q.push('type=' + encodeURIComponent(type));
+      if (prop && lock) q.push('lock=1');
+      return q.length ? BASE + '?' + q.join('&') : BASE;
+    }
+    function qr(url) {
+      return 'https://api.qrserver.com/v1/create-qr-code/?size=400x400&qzone=1&data=' + encodeURIComponent(url);
+    }
+    function esc(s) {
+      return String(s).replace(/[&<>"]/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+      });
+    }
+
+    fetch(API, { method: 'POST', body: JSON.stringify({ action: 'config' }) })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.error || 'config failed');
+        var props = res.properties || [], types = res.docTypes || [];
+
+        // one locked link per property
+        $('propLinks').className = '';
+        $('propLinks').innerHTML = props.map(function (p, i) {
+          return '<div class="proplink"><div class="pname">' + esc(p) + '</div>' +
+                 '<div class="linkrow"><input readonly id="pl' + i + '" value="' + esc(link(p, '', true)) + '" />' +
+                 '<button class="ghost" data-copy="pl' + i + '">Copy</button></div></div>';
+        }).join('');
+
+        // link builder
+        props.forEach(function (p) { $('bProp').appendChild(new Option(p, p)); });
+        types.forEach(function (t) { $('bType').appendChild(new Option(t.name, t.name)); });
+        function buildOut() { $('bOut').value = link($('bProp').value, $('bType').value, $('bLock').checked); }
+        ['bProp', 'bType', 'bLock'].forEach(function (id) { $(id).addEventListener('input', buildOut); });
+        buildOut();
+
+        // printable QR cards
+        $('qrCards').innerHTML = props.map(function (p) {
+          var u = link(p, '', true);
+          return '<div class="qcard">' +
+            '<div class="qorg">' + esc(CFG.ORG_NAME || 'Documents Portal') + '</div>' +
+            '<div class="qprop">' + esc(p) + '</div>' +
+            '<img src="' + esc(qr(u)) + '" alt="QR code for ' + esc(p) + '" />' +
+            '<div class="qhow">📄 Scan with your phone camera to upload documents<br>(fire inspections, manager reports, utilities…)</div>' +
+            '<div class="qurl">' + esc(u) + '</div>' +
+          '</div>';
+        }).join('');
+      })
+      .catch(function (err) {
+        $('banner').textContent = 'Could not load the property list (' + err.message + '). The dashboard link above still works.';
+        $('banner').classList.add('show');
+      });
+
+    // copy buttons (event delegation covers rows added after load)
+    document.addEventListener('click', function (e) {
+      var id = e.target && e.target.getAttribute && e.target.getAttribute('data-copy');
+      if (!id) return;
+      var el = $(id);
+      el.select();
+      var done = function () {
+        var old = e.target.textContent;
+        e.target.textContent = '✓ Copied';
+        e.target.classList.add('copied');
+        setTimeout(function () { e.target.textContent = old; e.target.classList.remove('copied'); }, 1400);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(el.value).then(done, function () { document.execCommand('copy'); done(); });
+      } else { document.execCommand('copy'); done(); }
+    });
+  })();
+  </script>
+</body>
+</html>
