@@ -42,8 +42,10 @@ const CONFIG = {
   //    Recommended: set a shared staff word here to stop random internet spam.
   UPLOAD_KEY: '',
 
-  // 4) Largest file allowed, in megabytes.
-  MAX_FILE_MB: 40,
+  // 4) Largest file allowed, in megabytes. Heads-up: Google caps web-app
+  //    requests around ~50MB, and base64 adds ~33% — so files bigger than
+  //    ~35MB will fail at Google's edge no matter what this is set to.
+  MAX_FILE_MB: 100,
 
   // 5) Your properties. Add/remove freely — the website reads this list.
   PROPERTIES: [
@@ -77,17 +79,40 @@ const CONFIG = {
         { name: 'Pool / Spa', renewalMonths: 12 },
         { name: 'QA',         renewalMonths: 12 },
     ]},
-    { name: 'Commission',          renewalMonths: 1  },
-    { name: 'Monthly Star',        renewalMonths: 1  },
-    { name: 'Monthly Statistic',   renewalMonths: 1  },
-    { name: 'Insurance',           renewalMonths: 12 },
-    { name: 'Licenses & Permits',  renewalMonths: 12 },
-    { name: 'Contract',            renewalMonths: 0  },
-    { name: 'Manager Report',      renewalMonths: 12 },
-    { name: 'Utilities',           renewalMonths: 12 },
-    { name: 'Renovation',          renewalMonths: 0  },
-    { name: 'Franchise Agreement', renewalMonths: 0  },
-    { name: 'Other',               renewalMonths: 0  },
+    { name: 'Commission', subs: [
+        { name: 'Expedia',     renewalMonths: 1 },
+        { name: 'Booking.com', renewalMonths: 1 },
+    ]},
+    { name: 'Monthly Star',          renewalMonths: 1  },
+    { name: 'Monthly Statistic',     renewalMonths: 1  },
+    { name: 'Credit Card Statement', renewalMonths: 1  },
+    { name: 'Insurance',             renewalMonths: 12 },
+    { name: 'Licenses & Permits',    renewalMonths: 12 },
+    { name: 'Contract', subs: [
+        { name: 'Cable/internet',      renewalMonths: 0 },
+        { name: 'Pest Control',        renewalMonths: 0 },
+        { name: 'Elevator',            renewalMonths: 0 },
+        { name: 'Franchise Agreement', renewalMonths: 0 },
+    ]},
+    { name: 'Manager Report',        renewalMonths: 1  },
+    { name: 'Utilities', subs: [
+        { name: 'Cable',     renewalMonths: 1 },
+        { name: 'Telephone', renewalMonths: 1 },
+        { name: 'Electric',  renewalMonths: 1 },
+        { name: 'Gas',       renewalMonths: 1 },
+        { name: 'Water',     renewalMonths: 1 },
+        { name: 'Dumpster',  renewalMonths: 1 },
+    ]},
+    { name: 'Invoices', subs: [
+        { name: 'Breakfast',    renewalMonths: 1 },
+        { name: 'Pest Control', renewalMonths: 1 },
+        { name: 'Electric',     renewalMonths: 1 },
+        { name: 'Gas',          renewalMonths: 1 },
+        { name: 'Water',        renewalMonths: 1 },
+        { name: 'Dumpster',     renewalMonths: 1 },
+    ]},
+    { name: 'Renovation',            renewalMonths: 0  },
+    { name: 'Other',                 renewalMonths: 0  },
   ],
 };
 // ========================= END CONFIG (logic below) =========================
