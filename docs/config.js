@@ -13,5 +13,5 @@ window.PORTAL_CONFIG = {
 
   // On the dashboard, a document turns amber ("Due soon") this many days
   // before its renewal date.
-  DUE_SOON_DAYS: 30,
+  DUE_SOON_DAYS: 10,
 };
