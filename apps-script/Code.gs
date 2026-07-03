@@ -63,6 +63,7 @@ const CONFIG = {
     { name: 'Licenses & Permits',  renewalMonths: 12 },
     { name: 'Manager Report',      renewalMonths: 1  },
     { name: 'Utilities',           renewalMonths: 1  },
+    { name: 'Renovation',          renewalMonths: 0  },
     { name: 'Other',               renewalMonths: 0  },
   ],
 };
