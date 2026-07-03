@@ -155,8 +155,20 @@ Other handy URL patterns (the site understands these anywhere):
 - **Add a property or document type:** edit `PROPERTIES` / `DOC_TYPES` in
   `Code.gs`, then re-deploy a new version (B's note above). The website updates
   automatically — you don't touch the website for this.
-- **Change renewal periods:** edit `renewalMonths` in `DOC_TYPES` (`0` = never
-  expires).
+- **Subcategories:** a document type can hold subcategories — the upload form
+  then shows a second dropdown, Drive nests folders one level deeper
+  (`Inspection / Fire / <property>`), and the dashboard groups the columns:
+
+  ```javascript
+  { name: 'Inspection', subs: [
+      { name: 'Fire', renewalMonths: 12 },
+      { name: 'QA',   renewalMonths: 12 },
+  ]},
+  { name: 'Utilities', renewalMonths: 1 },   // simple types still work
+  ```
+
+  On the dashboard and in share links these appear as `Inspection — Fire`.
+- **Change renewal periods:** edit `renewalMonths` (`0` = never expires).
 - **Change "due soon" window:** `DUE_SOON_DAYS` in `config.js`.
 
 ---

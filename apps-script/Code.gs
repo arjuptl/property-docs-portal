@@ -9,15 +9,17 @@
  *    2. upload  -> saves an uploaded file into the right Drive folder
  *    3. list    -> (passcode protected) returns every file for the dashboard
  *
- *  Files are organized in Drive like this:
+ *  Files are organized in Drive like this (subcategories are optional):
  *
  *    [Your Root Folder]
- *      └── Fire Inspection
- *            ├── Maple Inn
- *            │     └── 2026-01-15__Annual Fire Report.pdf
- *            └── Riverside Hotel
- *      └── Manager Report
- *            └── ...
+ *      └── Inspection
+ *            └── Fire
+ *                  ├── Best Western Kalamazoo
+ *                  │     └── 2026-01-15__Annual Fire Report.pdf
+ *                  └── Hampton Inn Sturgis
+ *            └── QA
+ *      └── Manager Report          ← no subcategory: property folders sit here
+ *            └── Best Western Kalamazoo
  *
  *  SETUP: edit the CONFIG block below, then deploy as a Web App.
  *  Full step-by-step instructions are in README.md.
@@ -48,22 +50,43 @@ const CONFIG = {
     'Best Western Kalamazoo',
     'Hampton Inn Kalamazoo',
     'Hampton Inn Sturgis',
-    'Holiday Inn La Porte',
+    'Comfort Inn La Porte',
+    'Country Inn Traverse City',
+    'Comfort Inn Kalamazoo',
+    'Super 8 Manistee',
+    'Fairfield Inn Evansville',
+    'Holiday Inn Express Normal',
+    'Motel 6 Peoria',
+    'Comfort Inn South Haven',
+    'HomeTowne Studios Lansing',
+    'Holiday Inn Express Three Rivers',
+    'Hampton Inn Port Huron',
   ],
 
-  // 6) Document types. renewalMonths drives the compliance colors on the
-  //    dashboard (e.g. a fire inspection is due again 12 months after its date).
-  //    Use 0 for documents that never expire.
+  // 6) Document types. Two shapes are allowed, mix freely:
+  //      { name: 'Utilities', renewalMonths: 1 }          ← simple type
+  //      { name: 'Inspection', subs: [ {...}, {...} ] }   ← category with subcategories
+  //    renewalMonths drives the compliance colors on the dashboard (e.g. a fire
+  //    inspection is due again 12 months after its date). 0 = never expires.
   DOC_TYPES: [
-    { name: 'Fire Inspection',     renewalMonths: 12 },
-    { name: 'Health Inspection',   renewalMonths: 12 },
-    { name: 'Elevator Inspection', renewalMonths: 12 },
-    { name: 'Pool / Spa',          renewalMonths: 12 },
+    { name: 'Inspection', subs: [
+        { name: 'Fire',       renewalMonths: 12 },
+        { name: 'Health',     renewalMonths: 12 },
+        { name: 'Elevator',   renewalMonths: 12 },
+        { name: 'Backflow',   renewalMonths: 12 },
+        { name: 'Pool / Spa', renewalMonths: 12 },
+        { name: 'QA',         renewalMonths: 12 },
+    ]},
+    { name: 'Commission',          renewalMonths: 1  },
+    { name: 'Monthly Star',        renewalMonths: 1  },
+    { name: 'Monthly Statistic',   renewalMonths: 1  },
     { name: 'Insurance',           renewalMonths: 12 },
     { name: 'Licenses & Permits',  renewalMonths: 12 },
-    { name: 'Manager Report',      renewalMonths: 1  },
-    { name: 'Utilities',           renewalMonths: 1  },
+    { name: 'Contract',            renewalMonths: 0  },
+    { name: 'Manager Report',      renewalMonths: 12 },
+    { name: 'Utilities',           renewalMonths: 12 },
     { name: 'Renovation',          renewalMonths: 0  },
+    { name: 'Franchise Agreement', renewalMonths: 0  },
     { name: 'Other',               renewalMonths: 0  },
   ],
 };
@@ -78,9 +101,30 @@ const CONFIG = {
 function setupCheck() {
   const root = DriveApp.getFolderById(CONFIG.ROOT_FOLDER_ID);
   Logger.log('✅ Root folder found: "%s"', root.getName());
-  CONFIG.DOC_TYPES.forEach(function (dt) { getOrCreate(root, dt.name); });
+  CONFIG.DOC_TYPES.forEach(function (dt) {
+    const catFolder = getOrCreate(root, dt.name);
+    (dt.subs || []).forEach(function (s) { getOrCreate(catFolder, s.name); });
+  });
   Logger.log('✅ Verified %s document-type folders. You are ready to deploy.',
              CONFIG.DOC_TYPES.length);
+}
+
+
+/** Flattens DOC_TYPES: a category with subs becomes one entry per sub. */
+function flatTypes() {
+  const out = [];
+  CONFIG.DOC_TYPES.forEach(function (t) {
+    if (t.subs && t.subs.length) {
+      t.subs.forEach(function (s) {
+        out.push({ category: t.name, sub: s.name, label: t.name + ' — ' + s.name,
+                   renewalMonths: s.renewalMonths || 0 });
+      });
+    } else {
+      out.push({ category: t.name, sub: '', label: t.name,
+                 renewalMonths: t.renewalMonths || 0 });
+    }
+  });
+  return out;
 }
 
 
@@ -113,7 +157,10 @@ function handleConfig() {
   return {
     ok: true,
     properties: CONFIG.PROPERTIES,
-    docTypes: CONFIG.DOC_TYPES,
+    docTypes: CONFIG.DOC_TYPES,     // nested — the upload form builds its dropdowns from this
+    flatTypes: flatTypes().map(function (f) {
+      return { name: f.label, category: f.category, sub: f.sub, renewalMonths: f.renewalMonths };
+    }),
     uploadRequiresKey: !!CONFIG.UPLOAD_KEY,
     maxFileMb: CONFIG.MAX_FILE_MB,
   };
@@ -128,7 +175,16 @@ function handleUpload(b) {
   if (CONFIG.PROPERTIES.indexOf(b.property) === -1) {
     return { ok: false, error: 'Unknown property.' };
   }
-  if (!CONFIG.DOC_TYPES.some(function (d) { return d.name === b.docType; })) {
+  // Accept category+sub (current site) or a flat label (an older cached page).
+  let ft = null;
+  if (b.docCategory) {
+    ft = flatTypes().filter(function (f) {
+      return f.category === b.docCategory && f.sub === String(b.docSub || '');
+    })[0];
+  } else if (b.docType) {
+    ft = flatTypes().filter(function (f) { return f.label === b.docType; })[0];
+  }
+  if (!ft) {
     return { ok: false, error: 'Unknown document type.' };
   }
   if (!b.dataBase64 || !b.fileName) {
@@ -143,7 +199,8 @@ function handleUpload(b) {
   }
 
   const root = DriveApp.getFolderById(CONFIG.ROOT_FOLDER_ID);
-  const typeFolder = getOrCreate(root, b.docType);
+  let typeFolder = getOrCreate(root, ft.category);
+  if (ft.sub) typeFolder = getOrCreate(typeFolder, ft.sub);
   const propFolder = getOrCreate(typeFolder, b.property);
 
   // Prefix the filename with the report date (or today) so files sort by date
@@ -176,8 +233,9 @@ function handleList(b) {
   const root = DriveApp.getFolderById(CONFIG.ROOT_FOLDER_ID);
   const items = [];
 
-  CONFIG.DOC_TYPES.forEach(function (dt) {
-    const typeFolder = findChild(root, dt.name);
+  flatTypes().forEach(function (ft) {
+    let typeFolder = findChild(root, ft.category);
+    if (typeFolder && ft.sub) typeFolder = findChild(typeFolder, ft.sub);
     if (!typeFolder) return;
     CONFIG.PROPERTIES.forEach(function (prop) {
       const propFolder = findChild(typeFolder, prop);
@@ -189,7 +247,9 @@ function handleList(b) {
         try { meta = JSON.parse(f.getDescription() || '{}'); } catch (ignore) {}
         items.push({
           property: prop,
-          docType: dt.name,
+          docType: ft.label,      // composite, e.g. "Inspection — Fire"
+          category: ft.category,
+          sub: ft.sub,
           fileName: f.getName(),
           url: f.getUrl(),
           sizeKB: Math.round(f.getSize() / 1024),
@@ -206,7 +266,9 @@ function handleList(b) {
     ok: true,
     generatedAt: new Date().toISOString(),
     properties: CONFIG.PROPERTIES,
-    docTypes: CONFIG.DOC_TYPES,
+    docTypes: flatTypes().map(function (f) {
+      return { name: f.label, category: f.category, sub: f.sub, renewalMonths: f.renewalMonths };
+    }),
     items: items,
   };
 }

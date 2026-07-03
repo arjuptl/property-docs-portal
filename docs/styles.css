@@ -154,6 +154,8 @@ button.ghost {
 table.matrix { border-collapse: collapse; width: 100%; font-size: .85rem; }
 table.matrix th, table.matrix td { border: 1px solid var(--line); padding: 8px 10px; text-align: center; white-space: nowrap; }
 table.matrix thead th { background: #f8fafc; position: sticky; top: 0; }
+table.matrix thead th.cathead { background: #eef2f7; letter-spacing: .02em; }
+table.matrix thead th.subhead { font-weight: 500; font-size: .8rem; color: var(--muted); }
 table.matrix tbody th { text-align: left; background: #f8fafc; position: sticky; left: 0; font-weight: 600; }
 .cell { cursor: pointer; border-radius: 6px; padding: 4px 6px; display: inline-block; min-width: 64px; }
 .cell .d { display: block; font-size: .72rem; opacity: .8; }

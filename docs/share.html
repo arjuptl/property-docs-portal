@@ -109,7 +109,8 @@
       .then(function (r) { return r.json(); })
       .then(function (res) {
         if (!res.ok) throw new Error(res.error || 'config failed');
-        var props = res.properties || [], types = res.docTypes || [];
+        // flatTypes has "Inspection — Fire"-style labels; older backends only send docTypes.
+        var props = res.properties || [], types = res.flatTypes || res.docTypes || [];
 
         // one locked link per property
         $('propLinks').className = '';

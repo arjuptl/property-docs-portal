@@ -10,7 +10,8 @@
 
   var state = {
     properties: [],
-    docTypes: [],          // [{name, renewalMonths}]
+    docTypes: [],          // nested: [{name, renewalMonths}] or [{name, subs:[…]}]
+    flat: [],              // flattened: [{name(label), category, sub, renewalMonths}]
     uploadRequiresKey: false,
     maxFileMb: 40,
     files: [],             // chosen upload files
@@ -66,6 +67,7 @@
         if (!res.ok) throw new Error(res.error || 'Could not load config');
         state.properties = res.properties || [];
         state.docTypes = res.docTypes || [];
+        state.flat = normalizeFlat(res.flatTypes || res.docTypes || []);
         state.uploadRequiresKey = !!res.uploadRequiresKey;
         state.maxFileMb = res.maxFileMb || 40;
         populateDropdowns();
@@ -78,22 +80,51 @@
     initDashboard();
   }
 
+  // Works with both backend shapes: old flat entries pass through unchanged.
+  function normalizeFlat(list) {
+    return (list || []).map(function (t) {
+      return { name: t.name, category: t.category || t.name, sub: t.sub || '',
+               renewalMonths: t.renewalMonths || 0 };
+    });
+  }
+
   function populateDropdowns() {
     var prop = $('property'), dt = $('docType');
-    var fp = $('filterProperty'), fd = $('filterDocType');
+    var fp = $('filterProperty');
     prop.innerHTML = '<option value="">Select a property…</option>';
     dt.innerHTML = '<option value="">Select a document type…</option>';
     state.properties.forEach(function (p) {
       prop.appendChild(opt(p, p));
       fp.appendChild(opt(p, p));
     });
-    state.docTypes.forEach(function (d) {
-      dt.appendChild(opt(d.name, d.name));
-      fd.appendChild(opt(d.name, d.name));
-    });
+    state.docTypes.forEach(function (d) { dt.appendChild(opt(d.name, d.name)); });
+    dt.addEventListener('change', onCategoryChange);
+    refreshTypeFilter();
     if (state.uploadRequiresKey) $('uploadKeyField').style.display = '';
     $('dropHint').textContent = 'PDF, images, Word, Excel… up to ' + state.maxFileMb + 'MB each';
     applyLinkPresets();
+  }
+
+  // Show the subcategory dropdown only when the chosen category has subs.
+  function onCategoryChange() {
+    var cat = state.docTypes.filter(function (d) { return d.name === $('docType').value; })[0];
+    var sub = $('docSub');
+    if (cat && cat.subs && cat.subs.length) {
+      sub.innerHTML = '<option value="">Which kind of ' + escapeHtml(cat.name) + '?</option>';
+      cat.subs.forEach(function (s) { sub.appendChild(opt(s.name, s.name)); });
+      sub.style.display = '';
+    } else {
+      sub.innerHTML = '';
+      sub.style.display = 'none';
+    }
+  }
+
+  function refreshTypeFilter() {
+    var fd = $('filterDocType');
+    var keep = fd.value;
+    fd.innerHTML = '<option value="">All document types</option>';
+    state.flat.forEach(function (f) { fd.appendChild(opt(f.name, f.name)); });
+    fd.value = keep;
   }
 
   /* Pre-select property/doc-type from a share link, e.g.
@@ -114,8 +145,13 @@
       }
     }
     if (wantT) {
-      var dt = state.docTypes.filter(function (d) { return d.name.toLowerCase() === wantT; })[0];
-      if (dt) $('docType').value = dt.name;
+      // Match a flat label ("Inspection — Fire") or a bare category ("Utilities").
+      var ft = state.flat.filter(function (f) { return f.name.toLowerCase() === wantT; })[0];
+      if (ft) {
+        $('docType').value = ft.category;
+        onCategoryChange();
+        if (ft.sub) $('docSub').value = ft.sub;
+      }
     }
   }
 
@@ -178,18 +214,24 @@
 
   function doUpload() {
     var property = $('property').value;
-    var docType = $('docType').value;
+    var category = $('docType').value;
+    var needsSub = $('docSub').style.display !== 'none';
+    var sub = needsSub ? $('docSub').value : '';
     if (!property) return showMsg('uploadMsg', 'error', 'Please choose a property.');
-    if (!docType) return showMsg('uploadMsg', 'error', 'Please choose a document type.');
+    if (!category) return showMsg('uploadMsg', 'error', 'Please choose a document type.');
+    if (needsSub && !sub) return showMsg('uploadMsg', 'error', 'Please choose which kind of ' + escapeHtml(category) + '.');
     if (!state.files.length) return showMsg('uploadMsg', 'error', 'Please choose at least one file.');
     if (state.uploadRequiresKey && !$('uploadKey').value.trim()) {
       return showMsg('uploadMsg', 'error', 'An upload key is required.');
     }
 
+    var label = sub ? category + ' — ' + sub : category;
     var common = {
       action: 'upload',
       property: property,
-      docType: docType,
+      docCategory: category,
+      docSub: sub,
+      docType: label,          // also sent flat, so an older backend still accepts it
       reportDate: $('reportDate').value || '',
       uploadedBy: $('uploadedBy').value.trim(),
       note: $('note').value.trim(),
@@ -225,7 +267,7 @@
     function finish() {
       btn.disabled = false;
       if (!failed.length) {
-        showMsg('uploadMsg', 'success', '✅ Uploaded ' + done + ' file' + (done === 1 ? '' : 's') + ' to ' + escapeHtml(docType) + ' → ' + escapeHtml(property) + '.');
+        showMsg('uploadMsg', 'success', '✅ Uploaded ' + done + ' file' + (done === 1 ? '' : 's') + ' to ' + escapeHtml(label) + ' → ' + escapeHtml(property) + '.');
         state.files = []; renderFileList();
         $('note').value = ''; $('reportDate').value = '';
       } else {
@@ -282,8 +324,12 @@
   }
 
   function applyListResult(res) {
-    state.items = res.items || [];
-    if (res.docTypes) state.docTypes = res.docTypes;
+    state.items = (res.items || []).map(function (it) {
+      it.category = it.category || it.docType;   // old-backend items: category = flat name
+      it.sub = it.sub || '';
+      return it;
+    });
+    if (res.docTypes) { state.flat = normalizeFlat(res.docTypes); refreshTypeFilter(); }
     if (res.properties) state.properties = res.properties;
     $('genAt').textContent = 'Updated ' + new Date(res.generatedAt).toLocaleString();
     render();
@@ -357,7 +403,7 @@
   function renderStats(groups) {
     var counts = { ok: 0, due: 0, overdue: 0, missing: 0 };
     state.properties.forEach(function (p) {
-      state.docTypes.forEach(function (d) {
+      state.flat.forEach(function (d) {
         var st = statusFor(d, groups[p + '||' + d.name]);
         counts[st.key]++;
       });
@@ -377,11 +423,39 @@
     var onlyProblems = $('onlyProblems').checked;
     var fp = $('filterProperty').value, fd = $('filterDocType').value;
     var props = state.properties.filter(function (p) { return !fp || p === fp; });
-    var types = state.docTypes.filter(function (d) { return !fd || d.name === fd; });
+    var types = state.flat.filter(function (d) { return !fd || d.name === fd; });
 
-    var html = '<thead><tr><th>Property</th>';
-    types.forEach(function (d) { html += '<th>' + escapeHtml(d.name) + '</th>'; });
-    html += '</tr></thead><tbody>';
+    // Group consecutive columns by category for a two-row header:
+    //   | Property |      Inspection      | Insurance | Manager Report |
+    //   |          | Fire | Health | QA … |           |                |
+    var cats = [];
+    types.forEach(function (t) {
+      var c = cats[cats.length - 1];
+      if (!c || c.name !== t.category) { c = { name: t.category, types: [] }; cats.push(c); }
+      c.types.push(t);
+    });
+    var hasSubRow = types.some(function (t) { return t.sub; });
+
+    var html = '<thead><tr><th' + (hasSubRow ? ' rowspan="2"' : '') + '>Property</th>';
+    cats.forEach(function (c) {
+      if (c.types[0].sub) {
+        html += '<th colspan="' + c.types.length + '" class="cathead">' + escapeHtml(c.name) + '</th>';
+      } else {
+        c.types.forEach(function (t) {
+          html += '<th' + (hasSubRow ? ' rowspan="2"' : '') + '>' + escapeHtml(t.category) + '</th>';
+        });
+      }
+    });
+    html += '</tr>';
+    if (hasSubRow) {
+      html += '<tr>';
+      cats.forEach(function (c) {
+        if (!c.types[0].sub) return;
+        c.types.forEach(function (t) { html += '<th class="subhead">' + escapeHtml(t.sub) + '</th>'; });
+      });
+      html += '</tr>';
+    }
+    html += '</thead><tbody>';
 
     props.forEach(function (p) {
       var cells = '', rowHasProblem = false;
@@ -408,7 +482,7 @@
   function openModal(property, docType) {
     var list = state.items.filter(function (it) { return it.property === property && it.docType === docType; });
     list.sort(function (a, b) { return effDate(b).localeCompare(effDate(a)); });
-    $('modalTitle').textContent = docType + ' — ' + property;
+    $('modalTitle').textContent = docType + ' · ' + property;
     $('modalSub').textContent = list.length + ' document' + (list.length === 1 ? '' : 's');
     var body = $('modalBody');
     if (!list.length) {
@@ -433,9 +507,9 @@
 
   /* ------------------------------- export ------------------------------- */
   function exportCsv() {
-    var rows = [['Property', 'Document Type', 'Document Date', 'Uploaded At', 'Uploaded By', 'File Name', 'Size KB', 'Note', 'Link']];
+    var rows = [['Property', 'Category', 'Subcategory', 'Document Date', 'Uploaded At', 'Uploaded By', 'File Name', 'Size KB', 'Note', 'Link']];
     filterItems(state.items).forEach(function (it) {
-      rows.push([it.property, it.docType, it.reportDate, it.uploadedAt, it.uploadedBy, it.fileName, it.sizeKB, it.note, it.url]);
+      rows.push([it.property, it.category, it.sub, it.reportDate, it.uploadedAt, it.uploadedBy, it.fileName, it.sizeKB, it.note, it.url]);
     });
     var csv = rows.map(function (r) {
       return r.map(function (c) { return '"' + String(c == null ? '' : c).replace(/"/g, '""') + '"'; }).join(',');
