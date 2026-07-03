@@ -109,10 +109,6 @@ const CONFIG = {
     { name: 'Invoices', subs: [
         { name: 'Breakfast',    renewalMonths: 1 },
         { name: 'Pest Control', renewalMonths: 1 },
-        { name: 'Electric',     renewalMonths: 1 },
-        { name: 'Gas',          renewalMonths: 1 },
-        { name: 'Water',        renewalMonths: 1 },
-        { name: 'Dumpster',     renewalMonths: 1 },
     ]},
     { name: 'Renovation',            renewalMonths: 0  },
     { name: 'Other',                 renewalMonths: 0  },
@@ -125,7 +121,8 @@ const CONFIG = {
     SITE_URL: 'https://arjuptl.github.io/property-docs-portal/',
 
     // The "select few": get the full portfolio digest every week.
-    SUMMARY_EMAILS: ['arjuptl@gmail.com'],
+    // Add more the same way: ['a@x.com', 'b@y.com', 'c@z.com']
+    SUMMARY_EMAILS: ['arjuptl@gmail.com', 'kb24bhavik@gmail.com'],
 
     // Each property's GM / front desk. They only get an email when THEIR
     // property has something overdue, due soon, or missing.
